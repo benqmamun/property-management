@@ -1,0 +1,159 @@
+Master
+------------------
+  CREATE TABLE "PM_AGR_MST" 
+   (	"AGR_NO" NUMBER GENERATED ALWAYS AS IDENTITY MINVALUE 1 MAXVALUE 9999999999999999999999999999 INCREMENT BY 1 START WITH 1 CACHE 20 NOORDER  NOCYCLE  NOKEEP  NOSCALE  NOT NULL ENABLE, 
+	"AGR_ID" VARCHAR2(50) NOT NULL ENABLE, 
+	"AGR_DATE" DATE NOT NULL ENABLE, 
+	"CUSTOMER_NO" NUMBER(30,0), 
+	"DESCR" VARCHAR2(250), 
+	"SALES_EMP_NO" NUMBER(30,0), 
+	"SS_CREATOR" NUMBER(30,0), 
+	"SS_CREATED_ON" DATE, 
+	"SS_MODIFIER" NUMBER(30,0), 
+	"SS_MODIFIED_ON" DATE, 
+	"APPROVE_FLAG" NUMBER(1,0) DEFAULT 0, 
+	"APPROVE_BY" NUMBER(30,0), 
+	"ACTIVE_FLAG" NUMBER(1,0) DEFAULT 1, 
+	"EXPIRY_DATE" DATE, 
+	"PAYMENT_CYCLE" CHAR(1), 
+	"COLLECTION_DURATION" NUMBER, 
+	"TOTAL_AMOUNT" NUMBER, 
+	"DISCOUNT" NUMBER, 
+	"SUB_TOTAL" NUMBER, 
+	"VAT_PER" NUMBER, 
+	"VAT_AMOUNT" NUMBER, 
+	"GRAND_TOTAL" NUMBER, 
+	 CHECK (APPROVE_FLAG IN (0,1)) ENABLE, 
+	 CHECK (ACTIVE_FLAG IN (0,1)) ENABLE, 
+	 CHECK (PAYMENT_CYCLE IN ('D','W','M','Y')) ENABLE, 
+	 CHECK (DISCOUNT >= 0) ENABLE, 
+	 CHECK (VAT_PER >= 0) ENABLE, 
+	 PRIMARY KEY ("AGR_NO")
+  USING INDEX  ENABLE, 
+	 UNIQUE ("AGR_ID")
+  USING INDEX  ENABLE
+   ) ;
+
+  ALTER TABLE "PM_AGR_MST" ADD CONSTRAINT "FK_PM_AGRMST_CUSTOMER" FOREIGN KEY ("CUSTOMER_NO")
+	  REFERENCES "PM_CUSTOMER" ("CUSTOMER_NO") ENABLE;
+  ALTER TABLE "PM_AGR_MST" ADD CONSTRAINT "FK_PM_AGRMST_SALESMAN" FOREIGN KEY ("SALES_EMP_NO")
+	  REFERENCES "PM_SALESMANAGER" ("MANAGER_NO") ENABLE;
+
+  CREATE OR REPLACE EDITIONABLE TRIGGER "TRG_PM_AGR_ID" 
+BEFORE INSERT ON PM_AGR_MST
+FOR EACH ROW
+ WHEN (NEW.AGR_ID IS NULL) DECLARE
+  v_max_id NUMBER;
+BEGIN
+  SELECT NVL(MAX(TO_NUMBER(SUBSTR(AGR_ID, 4))), 0) + 1
+  INTO v_max_id
+  FROM PM_AGR_MST
+  WHERE REGEXP_LIKE(AGR_ID, '^AGR[0-9]{3}$');
+
+  :NEW.AGR_ID := 'AGR' || LPAD(v_max_id, 3, '0');
+END;
+/
+ALTER TRIGGER "TRG_PM_AGR_ID" ENABLE;
+
+Details
+------------
+  CREATE TABLE "PM_AGR_DTLS" 
+   (	"AGRDTL_NO" NUMBER GENERATED ALWAYS AS IDENTITY MINVALUE 1 MAXVALUE 9999999999999999999999999999 INCREMENT BY 1 START WITH 1 CACHE 20 NOORDER  NOCYCLE  NOKEEP  NOSCALE  NOT NULL ENABLE, 
+	"AGR_NO" NUMBER(30,0) NOT NULL ENABLE, 
+	"ITEM_NO" NUMBER(30,0), 
+	"QTY" NUMBER, 
+	"RATE" NUMBER, 
+	"ACTIVE_FLAG" NUMBER DEFAULT 0, 
+	"VAT_PER" NUMBER, 
+	"SECURITY_DEPOSIT" NUMBER, 
+	 CHECK (QTY >= 0) ENABLE, 
+	 CHECK (RATE >= 0) ENABLE, 
+	 CHECK (ACTIVE_FLAG IN (0,1)) ENABLE, 
+	 CHECK (VAT_PER IN (0,1)) ENABLE, 
+	 CHECK (SECURITY_DEPOSIT >= 0) ENABLE, 
+	 PRIMARY KEY ("AGRDTL_NO")
+  USING INDEX  ENABLE
+   ) ;
+
+  ALTER TABLE "PM_AGR_DTLS" ADD CONSTRAINT "FK_PM_AGRDTLS_AGR" FOREIGN KEY ("AGR_NO")
+	  REFERENCES "PM_AGR_MST" ("AGR_NO") ENABLE;
+  ALTER TABLE "PM_AGR_DTLS" ADD CONSTRAINT "FK_PM_AGRDTLS_ITEM" FOREIGN KEY ("ITEM_NO")
+	  REFERENCES "PM_ITEM" ("ITEM_NO") ENABLE;
+
+JavaScript
+---------------------------
+(function($) {
+
+  function update(model) {
+    var amtKey = model.getFieldKey("AMOUNT"), // Grid column name
+        total = 0;
+
+    model.forEach(function(record, index, id) {
+      var amount = parseFloat(record[amtKey]),
+          meta = model.getRecordMetadata(id);
+
+      if (!isNaN(amount) && !meta.deleted && !meta.agg) {
+        total += amount;
+      }
+    });
+
+    $s("P11_TOTAL_AMOUNT", total.toFixed(2));  // Update page item
+    $s("P11_SUB_TOTAL", total.toFixed(2));  // Update page item
+    $s("P11_GRAND_TOTAL", total.toFixed(2));  // Update page item
+  }
+
+  $(function() {
+    // Grid Region Static ID = AGR_GRID (replace if needed)
+    $("#AGR_GRID").on("interactivegridviewmodelcreate", function(event, ui) {
+      var model = ui.model;
+
+      if (ui.viewId === "grid") {
+        model.subscribe({
+          onChange: function(type, change) {
+            if (type === "set" && change.field === "AMOUNT") {
+              update(model);
+            }
+          }
+        });
+
+        // Optional: load and calculate at first
+        model.fetchAll(function() {
+          update(model);
+        });
+      }
+    });
+  });
+
+})(apex.jQuery);
+
+// Discount Calculation
+function updateSubTotal() {
+  var total = parseFloat($v("P11_TOTAL_AMOUNT")) || 0;
+  var discount = parseFloat($v("P11_DISCOUNT")) || 0;
+  var subTotal = total - discount;
+
+  if (subTotal < 0) subTotal = 0;
+
+  $s("P11_SUB_TOTAL", subTotal.toFixed(2));
+  
+}
+
+
+// Vat Calculation
+function updateFullTotal() {
+  var total = parseFloat($v("P11_TOTAL_AMOUNT")) || 0;
+  var discount = parseFloat($v("P11_DISCOUNT")) || 0;
+  var vatPercent = parseFloat($v("P11_VAT_PER")) || 0;
+
+  var subTotal = total - discount;
+  if (subTotal < 0) subTotal = 0;
+
+  var vatAmount = subTotal * vatPercent / 100;
+  var grandTotal = subTotal + vatAmount;
+
+  // Set values
+  $s("P11_SUB_TOTAL", subTotal.toFixed(2));
+  $s("P11_VAT_AMOUNT", vatAmount.toFixed(2));
+  $s("P11_GRAND_TOTAL", grandTotal.toFixed(2));
+}
+

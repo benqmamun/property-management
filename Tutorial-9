@@ -1,0 +1,77 @@
+
+Table
+-------------
+  CREATE TABLE "PM_BILL" 
+   (	"BILL_NO" NUMBER GENERATED ALWAYS AS IDENTITY MINVALUE 1 MAXVALUE 9999999999999999999999999999 INCREMENT BY 1 START WITH 1 CACHE 20 NOORDER  NOCYCLE  NOKEEP  NOSCALE  NOT NULL ENABLE, 
+	"AGREEMENT_NO" NUMBER(30,0) NOT NULL ENABLE, 
+	"CUSTOMER_NO" NUMBER(30,0), 
+	"BILL_DATE" DATE DEFAULT SYSDATE, 
+	"BILL_PERIOD_FROM" DATE NOT NULL ENABLE, 
+	"BILL_PERIOD_TO" DATE NOT NULL ENABLE, 
+	"BILL_MONTH" VARCHAR2(7) GENERATED ALWAYS AS (TO_CHAR("BILL_PERIOD_FROM",'YYYY-MM')) VIRTUAL , 
+	"BILL_AMOUNT" NUMBER(15,2), 
+	"BILL_STATUS" VARCHAR2(20) DEFAULT 'DRAFT', 
+	"REMARKS" VARCHAR2(500), 
+	"SS_CREATOR" NUMBER(30,0), 
+	"SS_CREATED_ON" DATE, 
+	"UPDATE_BY" NUMBER, 
+	"UPDATE_ON" DATE, 
+	 PRIMARY KEY ("BILL_NO")
+  USING INDEX  ENABLE
+   ) ;
+
+  ALTER TABLE "PM_BILL" ADD CONSTRAINT "FK_PM_BILL_AGR" FOREIGN KEY ("AGREEMENT_NO")
+	  REFERENCES "PM_AGR_MST" ("AGR_NO") ENABLE;
+
+Page Process
+------
+DECLARE
+  CURSOR c_agreements IS
+    SELECT AGR_NO, CUSTOMER_NO, GRAND_TOTAL
+    FROM PM_AGR_MST;
+
+  v_exists NUMBER;
+  v_duplicate_count NUMBER := 0;
+BEGIN
+  FOR rec IN c_agreements LOOP
+    -- Check by month-level match
+    SELECT COUNT(*) INTO v_exists
+    FROM PM_BILL
+    WHERE AGREEMENT_NO = rec.AGR_NO
+      AND TO_CHAR(BILL_PERIOD_FROM, 'YYYYMM') = TO_CHAR(TO_DATE(:P16_FROM, 'DD/MM/YYYY'), 'YYYYMM');
+
+    IF v_exists = 0 THEN
+      -- Insert new bill
+      INSERT INTO PM_BILL (
+        AGREEMENT_NO,
+        CUSTOMER_NO,
+        BILL_PERIOD_FROM,
+        BILL_PERIOD_TO,
+        BILL_AMOUNT,
+        BILL_STATUS,
+        SS_CREATOR
+      )
+      VALUES (
+        rec.AGR_NO,
+        rec.CUSTOMER_NO,
+        TO_DATE(:P16_FROM, 'DD/MM/YYYY'),
+        TO_DATE(:P16_TO, 'DD/MM/YYYY'),
+        rec.GRAND_TOTAL,
+        '0',
+        :SS_USER_NO
+      );
+    ELSE
+      -- Only count duplicates
+      v_duplicate_count := v_duplicate_count + 1;
+    END IF;
+  END LOOP;
+
+  -- Show info message (not error)
+  IF v_duplicate_count > 0 THEN
+    APEX_APPLICATION.G_PRINT_SUCCESS_MESSAGE := 
+      v_duplicate_count || ' agreement(s) were already billed for this month and skipped.';
+  ELSE
+    APEX_APPLICATION.G_PRINT_SUCCESS_MESSAGE := 
+      'Bill(s) created successfully.';
+  END IF;
+END;

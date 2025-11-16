@@ -1,0 +1,119 @@
+WITH
+-- ============================================================
+-- 1. Opening Balance (before :P20_FROM)
+-- ============================================================
+OPENING AS (
+    SELECT
+        CUSTOMER_NO,
+        SUM(BILL_BEFORE) - SUM(PAY_BEFORE) AS OPENING_BAL
+    FROM (
+        -- Bills before from-date
+        SELECT 
+            CUSTOMER_NO,
+            SUM(CASE 
+                    WHEN BILL_DATE < TO_DATE(:P20_FROM,'YYYY-MM-DD')
+                    THEN BILL_AMOUNT ELSE 0 
+                END) AS BILL_BEFORE,
+            0 AS PAY_BEFORE
+        FROM PM_BILL
+        WHERE BILL_STATUS = 1
+        GROUP BY CUSTOMER_NO
+
+        UNION ALL
+
+        -- Payments before from-date
+        SELECT
+            CUSTOMER_NO,
+            0 AS BILL_BEFORE,
+            SUM(CASE 
+                    WHEN PAYMENT_DATE < TO_DATE(:P20_FROM,'YYYY-MM-DD')
+                    THEN PAYMENT_AMOUNT ELSE 0 
+                END) AS PAY_BEFORE
+        FROM PM_PAYMENT
+        WHERE STATUS = 1
+        GROUP BY CUSTOMER_NO
+    ) X
+    GROUP BY CUSTOMER_NO
+),
+
+-- ============================================================
+--  2. Bills in date range
+-- ============================================================
+BILLS AS (
+    SELECT
+        B.CUSTOMER_NO,
+        B.BILL_DATE        AS LEDGER_DATE,
+        'BILL'             AS TYPE,
+        B.BILL_NO          AS REF_NO,
+        -- narration = default text + remarks
+        'Bill - ' || NVL(B.REMARKS, '') AS NARRATION,
+        B.BILL_AMOUNT      AS DEBIT,
+        0                  AS CREDIT
+    FROM PM_BILL B
+    WHERE B.BILL_STATUS = 1
+      AND B.BILL_DATE BETWEEN TO_DATE(:P20_FROM,'YYYY-MM-DD')
+                          AND TO_DATE(:P20_TO,'YYYY-MM-DD')
+),
+
+-- ============================================================
+--  3. Payments in date range
+-- ============================================================
+PAYMENTS AS (
+    SELECT
+        P.CUSTOMER_NO,
+        P.PAYMENT_DATE     AS LEDGER_DATE,
+        'PAYMENT'          AS TYPE,
+        P.PAYMENT_NO       AS REF_NO,
+        -- narration = default text + remarks
+        'Payment - ' || NVL(P.REMARKS, '') AS NARRATION,
+        0                  AS DEBIT,
+        P.PAYMENT_AMOUNT   AS CREDIT
+    FROM PM_PAYMENT P
+    WHERE P.STATUS = 1
+      AND P.PAYMENT_DATE BETWEEN TO_DATE(:P20_FROM,'YYYY-MM-DD')
+                              AND TO_DATE(:P20_TO,'YYYY-MM-DD')
+),
+
+-- ============================================================
+--  4. Combine Bill + Payment
+-- ============================================================
+LEDGER_RAW AS (
+    SELECT * FROM BILLS
+    UNION ALL
+    SELECT * FROM PAYMENTS
+)
+
+-- ============================================================
+--  5. Final Ledger Output
+-- ============================================================
+SELECT
+    C.CUSTOMER_ID,
+    C.CUSTOMER_NAME,
+    L.LEDGER_DATE,
+    L.TYPE,
+    L.REF_NO,
+    L.NARRATION,
+    L.DEBIT,
+    L.CREDIT,
+
+    -- Opening for display
+    NVL(O.OPENING_BAL, 0) AS OPENING_BALANCE,
+
+    -- Running balance
+    NVL(O.OPENING_BAL, 0)
+      + SUM(L.DEBIT - L.CREDIT)
+          OVER (PARTITION BY L.CUSTOMER_NO 
+                ORDER BY L.LEDGER_DATE, L.REF_NO) AS BALANCE
+
+FROM LEDGER_RAW L
+JOIN PM_CUSTOMER C 
+  ON C.CUSTOMER_NO = L.CUSTOMER_NO
+LEFT JOIN OPENING O 
+  ON O.CUSTOMER_NO = L.CUSTOMER_NO
+
+WHERE
+    (:P20_CUSTOMER IS NULL OR C.CUSTOMER_NO = :P20_CUSTOMER)
+
+ORDER BY
+    L.LEDGER_DATE,
+    L.REF_NO;

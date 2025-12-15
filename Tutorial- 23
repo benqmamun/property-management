@@ -1,0 +1,41 @@
+WITH user_role AS (
+    SELECT ROLE_NO
+    FROM PM_USER_ROLE_MAP
+    WHERE USER_NO = :SS_USER_NO
+),
+menu_list AS (
+    SELECT 
+        m.MENU_NO       AS NAV_ID,
+        m.MENU_NAME     AS NAV_NAME,
+        m.PARENT_ID     AS PARENT_ID,
+        m.PAGE_NO       AS PAGE_NO,
+        m.SL_NO         AS SL_NO,
+        NULL AS ICON_IMG
+    FROM PM_MENU m
+    JOIN PM_USER_ROLE_DTL d 
+        ON d.MENU_NO = m.MENU_NO
+    JOIN user_role r 
+        ON r.ROLE_NO = d.ROLE_NO
+)
+SELECT
+    LEVEL AS "level",
+    NAV_NAME AS "label",
+
+    DECODE(
+        CONNECT_BY_ISLEAF, 
+        0, NULL,
+        'f?p=&APP_ID.:' || TO_CHAR(PAGE_NO) || ':&SESSION.:::::'
+    ) AS target,
+
+    -- ⭐ TRUE CURRENT PAGE HIGHLIGHT
+    CASE 
+        WHEN PAGE_NO = :APP_PAGE_ID THEN 'YES'
+        ELSE 'NO'
+    END AS is_current,
+
+    DECODE(NVL(ICON_IMG, 'A'), 'A', NULL, ICON_IMG) AS image
+
+FROM menu_list
+START WITH PARENT_ID IS NULL
+CONNECT BY PRIOR NAV_ID = PARENT_ID
+ORDER SIBLINGS BY SL_NO ASC, NAV_NAME DESC;

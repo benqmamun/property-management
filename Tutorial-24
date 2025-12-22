@@ -1,0 +1,49 @@
+
+CREATE Button
+----------------
+CREATE OR REPLACE FUNCTION FN_PM_CAN_CREATE (
+    p_user_no IN NUMBER,
+    p_page_no IN NUMBER
+) RETURN NUMBER
+IS
+    l_allowed NUMBER := 0;
+BEGIN
+    SELECT NVL(MAX(d.CAN_CREATE), 0)
+    INTO l_allowed
+    FROM PM_MENU mn
+    JOIN PM_USER_ROLE_DTL d ON d.MENU_NO = mn.MENU_NO
+    JOIN PM_USER_ROLE_MAP m ON m.ROLE_NO = d.ROLE_NO
+    JOIN PM_USER_ROLE r     ON r.ROLE_NO = m.ROLE_NO
+    WHERE m.USER_NO   = p_user_no
+      AND mn.PAGE_NO  = p_page_no
+      AND mn.ACTIVE   = 1
+      AND r.ACTIVE_ST = 1;
+
+    RETURN l_allowed;
+END;
+/
+
+
+DELETE Button
+----------------
+CREATE OR REPLACE FUNCTION FN_PM_CAN_DELETE (
+    p_user_no IN NUMBER,
+    p_page_no IN NUMBER
+) RETURN NUMBER
+IS
+    l_allowed NUMBER := 0;
+BEGIN
+    SELECT NVL(MAX(d.CAN_REMOVE), 0)
+    INTO l_allowed
+    FROM PM_MENU mn
+    JOIN PM_USER_ROLE_DTL d ON d.MENU_NO = mn.MENU_NO
+    JOIN PM_USER_ROLE_MAP m ON m.ROLE_NO = d.ROLE_NO
+    JOIN PM_USER_ROLE r     ON r.ROLE_NO = m.ROLE_NO
+    WHERE m.USER_NO   = p_user_no
+      AND mn.PAGE_NO  = p_page_no
+      AND mn.ACTIVE   = 1
+      AND r.ACTIVE_ST = 1;
+
+    RETURN l_allowed;
+END;
+/
